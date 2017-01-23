@@ -1,4 +1,4 @@
-/* eslint-disable no-console */
+/* eslint-disable no-console, react/prop-types */
 import 'rc-cascader/assets/index.less';
 import Cascader from 'rc-cascader';
 import React from 'react';
@@ -42,7 +42,7 @@ const addressOptions = [{
   }],
 }];
 
-const Demo = React.createClass({
+const MyCascader = React.createClass({
   getInitialState() {
     return {
       inputValue: '',
@@ -55,15 +55,59 @@ const Demo = React.createClass({
     });
   },
   render() {
+    const { builtinPlacements } = this.props;
     return (
-      <Cascader options={addressOptions} onChange={this.onChange}>
+      <Cascader
+        options={addressOptions}
+        builtinPlacements={builtinPlacements}
+        onChange={this.onChange}
+      >
         <input
-          placeholder="please select address"
+          placeholder={builtinPlacements ? 'Will not adjust position' : 'Will adjust position'}
           value={this.state.inputValue}
+          style={{ width: 170 }}
         />
       </Cascader>
     );
   },
 });
 
-ReactDOM.render(<Demo />, document.getElementById('__react-content'));
+const placements = {
+  bottomLeft: {
+    points: ['tl', 'bl'],
+    offset: [0, 4],
+    overflow: {
+      adjustY: 1,
+    },
+  },
+  topLeft: {
+    points: ['bl', 'tl'],
+    offset: [0, -4],
+    overflow: {
+      adjustY: 1,
+    },
+  },
+  bottomRight: {
+    points: ['tr', 'br'],
+    offset: [0, 4],
+    overflow: {
+      adjustY: 1,
+    },
+  },
+  topRight: {
+    points: ['br', 'tr'],
+    offset: [0, -4],
+    overflow: {
+      adjustY: 1,
+    },
+  },
+};
+
+ReactDOM.render(
+  <div style={{ textAlign: 'right', margin: '0 80px' }}>
+    <MyCascader />
+    <br />
+    <br />
+    <MyCascader builtinPlacements={placements} />
+  </div>
+, document.getElementById('__react-content'));
