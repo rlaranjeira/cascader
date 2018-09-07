@@ -1,6 +1,7 @@
 import React, { Component, cloneElement } from 'react';
 import PropTypes from 'prop-types';
 import Trigger from 'rc-trigger';
+import warning from 'warning';
 import Menus from './Menus';
 import KeyCode from 'rc-util/lib/KeyCode';
 import arrayTreeFilter from 'array-tree-filter';
@@ -51,11 +52,15 @@ class Cascader extends Component {
       initialValue = props.defaultValue || [];
     }
 
+    warning(!('filedNames' in props),
+      '`filedNames` of Cascader is a typo usage and deprecated, please use `fieldNames` intead.');
+
     this.state = {
       popupVisible: props.popupVisible,
       activeValue: initialValue,
       value: initialValue,
     };
+    this.defaultFieldNames = { label: 'label', value: 'value', children: 'children' };
   }
   componentWillReceiveProps(nextProps) {
     if ('value' in nextProps && !shallowEqualArrays(this.props.value, nextProps.value)) {
@@ -77,26 +82,45 @@ class Cascader extends Component {
     }
   }
   getPopupDOMNode() {
-    return this.refs.trigger.getPopupDomNode();
+    return this.trigger.getPopupDomNode();
+  }
+  getFieldName(name) {
+    const { defaultFieldNames } = this;
+    const { fieldNames, filedNames } = this.props;
+    if ('filedNames' in this.props) {
+      return filedNames[name] || defaultFieldNames[name]; // For old compatibility
+    }
+    return fieldNames[name] || defaultFieldNames[name];
+  }
+  getFieldNames() {
+    const { fieldNames, filedNames } = this.props;
+    if ('filedNames' in this.props) {
+      return filedNames; // For old compatibility
+    }
+    return fieldNames;
   }
   getCurrentLevelOptions() {
     const { options } = this.props;
     const { activeValue = [] } = this.state;
-    const result = arrayTreeFilter(options, (o, level) => o.value === activeValue[level]);
+    const result = arrayTreeFilter(options,
+      (o, level) => o[this.getFieldName('value')] === activeValue[level],
+      { childrenKeyName: this.getFieldName('children') });
     if (result[result.length - 2]) {
-      return result[result.length - 2].children;
+      return result[result.length - 2][this.getFieldName('children')];
     }
     return [...options].filter(o => !o.disabled);
   }
   getActiveOptions(activeValue) {
-    return arrayTreeFilter(this.props.options, (o, level) => o.value === activeValue[level]);
+    return arrayTreeFilter(this.props.options,
+      (o, level) => o[this.getFieldName('value')] === activeValue[level],
+      { childrenKeyName: this.getFieldName('children') });
   }
   setPopupVisible = (popupVisible) => {
     if (!('popupVisible' in this.props)) {
       this.setState({ popupVisible });
     }
     // sync activeValue with value when panel open
-    if (popupVisible && !this.state.visible) {
+    if (popupVisible && !this.state.popupVisible) {
       this.setState({
         activeValue: this.state.value,
       });
@@ -105,7 +129,7 @@ class Cascader extends Component {
   }
   handleChange = (options, setProps, e) => {
     if (e.type !== 'keydown' || e.keyCode === KeyCode.ENTER) {
-      this.props.onChange(options.map(o => o.value), options);
+      this.props.onChange(options.map(o => o[this.getFieldName('value')]), options);
       this.setPopupVisible(setProps.visible);
     }
   }
@@ -113,23 +137,20 @@ class Cascader extends Component {
     this.setPopupVisible(popupVisible);
   }
   handleMenuSelect = (targetOption, menuIndex, e) => {
-    if (e && e.preventDefault) {
-      e.preventDefault();
-    }
     // Keep focused state for keyboard support
-    const triggerNode = this.refs.trigger.getRootDomNode();
+    const triggerNode = this.trigger.getRootDomNode();
     if (triggerNode && triggerNode.focus) {
       triggerNode.focus();
     }
-    const { changeOnSelect, loadData } = this.props;
+    const { changeOnSelect, loadData, expandTrigger } = this.props;
     if (!targetOption || targetOption.disabled) {
       return;
     }
     let { activeValue } = this.state;
     activeValue = activeValue.slice(0, menuIndex + 1);
-    activeValue[menuIndex] = targetOption.value;
+    activeValue[menuIndex] = targetOption[this.getFieldName('value')];
     const activeOptions = this.getActiveOptions(activeValue);
-    if (targetOption.isLeaf === false && !targetOption.children && loadData) {
+    if (targetOption.isLeaf === false && !targetOption[this.getFieldName('children')] && loadData) {
       if (changeOnSelect) {
         this.handleChange(activeOptions, { visible: true }, e);
       }
@@ -138,12 +159,18 @@ class Cascader extends Component {
       return;
     }
     const newState = {};
-    if (!targetOption.children || !targetOption.children.length) {
+    if (!targetOption[this.getFieldName('children')]
+      || !targetOption[this.getFieldName('children')].length) {
       this.handleChange(activeOptions, { visible: false }, e);
       // set value to activeValue when select leaf option
       newState.value = activeValue;
-    } else if (changeOnSelect) {
-      this.handleChange(activeOptions, { visible: true }, e);
+      // add e.type judgement to prevent `onChange` being triggered by mouseEnter
+    } else if (changeOnSelect && (e.type === 'click' || e.type === 'keydown')) {
+      if (expandTrigger === 'hover') {
+        this.handleChange(activeOptions, { visible: false }, e);
+      } else {
+        this.handleChange(activeOptions, { visible: true }, e);
+      }
       // set value to activeValue on every select
       newState.value = activeValue;
     }
@@ -156,10 +183,19 @@ class Cascader extends Component {
     this.setState(newState);
   }
   handleKeyDown = (e) => {
+    const { children } = this.props;
+    // https://github.com/ant-design/ant-design/issues/6717
+    // Don't bind keyboard support when children specify the onKeyDown
+    if (children && children.props.onKeyDown) {
+      children.props.onKeyDown(e);
+      return;
+    }
     const activeValue = [...this.state.activeValue];
     const currentLevel = activeValue.length - 1 < 0 ? 0 : activeValue.length - 1;
     const currentOptions = this.getCurrentLevelOptions();
-    const currentIndex = currentOptions.map(o => o.value).indexOf(activeValue[currentLevel]);
+    const currentIndex = currentOptions
+      .map(o => o[this.getFieldName('value')])
+      .indexOf(activeValue[currentLevel]);
     if (e.keyCode !== KeyCode.DOWN &&
         e.keyCode !== KeyCode.UP &&
         e.keyCode !== KeyCode.LEFT &&
@@ -172,6 +208,8 @@ class Cascader extends Component {
     // Press any keys above to reopen menu
     if (!this.state.popupVisible &&
         e.keyCode !== KeyCode.BACKSPACE &&
+        e.keyCode !== KeyCode.LEFT &&
+        e.keyCode !== KeyCode.RIGHT &&
         e.keyCode !== KeyCode.ESC) {
       this.setPopupVisible(true);
       return;
@@ -189,12 +227,14 @@ class Cascader extends Component {
       } else {
         nextIndex = 0;
       }
-      activeValue[currentLevel] = currentOptions[nextIndex].value;
+      activeValue[currentLevel] = currentOptions[nextIndex][this.getFieldName('value')];
     } else if (e.keyCode === KeyCode.LEFT || e.keyCode === KeyCode.BACKSPACE) {
       activeValue.splice(activeValue.length - 1, 1);
     } else if (e.keyCode === KeyCode.RIGHT) {
-      if (currentOptions[currentIndex] && currentOptions[currentIndex].children) {
-        activeValue.push(currentOptions[currentIndex].children[0].value);
+      if (currentOptions[currentIndex]
+        && currentOptions[currentIndex][this.getFieldName('children')]) {
+        activeValue.push(currentOptions[currentIndex]
+          [this.getFieldName('children')][0][this.getFieldName('value')]);
       }
     } else if (e.keyCode === KeyCode.ESC) {
       this.setPopupVisible(false);
@@ -211,6 +251,11 @@ class Cascader extends Component {
       this.props.onKeyDown(e);
     }
   }
+
+  saveTrigger = (node) => {
+    this.trigger = node;
+  }
+
   render() {
     const {
       prefixCls, transitionName, popupClassName, options, disabled,
@@ -223,7 +268,8 @@ class Cascader extends Component {
       menus = (
         <Menus
           {...this.props}
-          value={this.state.value}
+          fieldNames={this.getFieldNames()}
+          defaultFieldNames={this.defaultFieldNames}
           activeValue={this.state.activeValue}
           onSelect={this.handleMenuSelect}
           visible={this.state.popupVisible}
@@ -234,7 +280,7 @@ class Cascader extends Component {
     }
     return (
       <Trigger
-        ref="trigger"
+        ref={this.saveTrigger}
         {...restProps}
         options={options}
         disabled={disabled}
@@ -250,7 +296,7 @@ class Cascader extends Component {
       >
         {cloneElement(children, {
           onKeyDown: this.handleKeyDown,
-          tabIndex: 0,
+          tabIndex: disabled ? undefined : 0,
         })}
       </Trigger>
     );
@@ -267,6 +313,9 @@ Cascader.defaultProps = {
   popupClassName: '',
   popupPlacement: 'bottomLeft',
   builtinPlacements: BUILT_IN_PLACEMENTS,
+  expandTrigger: 'click',
+  fieldNames: { label: 'label', value: 'value', children: 'children' },
+  expandIcon: '>',
 };
 
 Cascader.propTypes = {
@@ -287,6 +336,11 @@ Cascader.propTypes = {
   changeOnSelect: PropTypes.bool,
   children: PropTypes.node,
   onKeyDown: PropTypes.func,
+  expandTrigger: PropTypes.string,
+  fieldNames: PropTypes.object,
+  filedNames: PropTypes.object, // typo but for compatibility
+  expandIcon: PropTypes.node,
+  loadingIcon: PropTypes.node,
 };
 
 export default Cascader;
